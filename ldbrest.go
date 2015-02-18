@@ -2,8 +2,9 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"flag"
-	"github.com/gin-gonic/gin"
+	"github.com/julienschmidt/httprouter"
 	"github.com/jmhodges/levigo"
 	"io"
 	"log"
@@ -34,61 +35,70 @@ func main() {
 	defer ro.Close()
 	defer db.Close()
 
-	engine := initEngine()
-	log.Print(run(engine))
+	router := initRouter()
+	log.Print(run(router))
 }
 
-func initEngine() *gin.Engine {
-	engine := gin.New()
-	engine.Use(gin.Recovery())
+func initRouter() *httprouter.Router {
+	router := &httprouter.Router{
+		// precision in urls -- I'd rather know when my client is wrong
+		RedirectTrailingSlash: false,
+		RedirectFixedPath: false,
 
-	engine.GET("/key/:name", func(c *gin.Context) {
-		b, err := db.Get(ro, []byte(c.Params.ByName("name")))
+		HandleMethodNotAllowed: true,
+		PanicHandler: handlePanics,
+	}
+
+	router.GET("/key/:name", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+		b, err := db.Get(ro, []byte(p.ByName("name")))
 		if err != nil {
-			c.Fail(500, err)
+			failErr(w, err)
 		} else if b == nil {
-			c.AbortWithStatus(404)
+			failCode(w, http.StatusNotFound)
+			w.WriteHeader(404)
 		} else {
-			c.String(200, string(b))
+			w.Write(b)
 		}
 	})
 
-	engine.PUT("/key/:name", func(c *gin.Context) {
+	router.PUT("/key/:name", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 		buf := &bytes.Buffer{}
-		if _, err := io.Copy(buf, c.Request.Body); err != nil {
-			c.Fail(500, err)
+		if _, err := io.Copy(buf, r.Body); err != nil {
+			failErr(w, err)
 			return
 		}
 
-		err := db.Put(wo, []byte(c.Params.ByName("name")), buf.Bytes())
+		err := db.Put(wo, []byte(p.ByName("name")), buf.Bytes())
 		if err != nil {
-			c.Fail(500, err)
+			failErr(w, err)
 		} else {
-			c.Writer.WriteHeader(204)
+			w.WriteHeader(204)
 		}
 	})
 
-	engine.POST("/snapshot", func(c *gin.Context) {
+	router.POST("/snapshot", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 		req := &struct {
 			Destination string
 		}{}
-		if !c.Bind(req) {
+		err := json.NewDecoder(r.Body).Decode(req)
+		if err != nil {
+			failErr(w, err)
 			return
 		}
 
 		if err := makeSnap(req.Destination); err != nil {
-			c.Fail(500, err)
+			failErr(w, err)
 		} else {
-			c.Writer.WriteHeader(204)
+			w.WriteHeader(204)
 		}
 	})
 
-	return engine
+	return router
 }
 
-func run(engine *gin.Engine) error {
+func run(router *httprouter.Router) error {
 	if strings.Contains(*serveaddr, ":") {
-		return engine.Run(*serveaddr)
+		return http.ListenAndServe(*serveaddr, router)
 	}
 
 	listener, err := net.Listen("unix", *serveaddr)
@@ -96,7 +106,7 @@ func run(engine *gin.Engine) error {
 		log.Fatal(err)
 	}
 
-	return (&http.Server{Handler: engine}).Serve(listener)
+	return (&http.Server{Handler: router}).Serve(listener)
 }
 
 func openDB() {
@@ -177,4 +187,19 @@ func dumpBatch(wb *levigo.WriteBatch, dest *levigo.DB, more bool) (*levigo.Write
 		return levigo.NewWriteBatch(), nil
 	}
 	return nil, nil
+}
+
+func handlePanics(w http.ResponseWriter, r *http.Request, err interface{}) {
+	log.Printf("PANIC in handler: %s", err)
+	w.WriteHeader(http.StatusInternalServerError)
+}
+
+func failErr(w http.ResponseWriter, err error) {
+	log.Print(err)
+	w.WriteHeader(http.StatusInternalServerError)
+}
+
+func failCode(w http.ResponseWriter, code int) {
+	w.WriteHeader(code)
+	w.Write([]byte(http.StatusText(code)))
 }
