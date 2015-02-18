@@ -139,11 +139,11 @@ func makeSnap(dest string) error {
 	defer to.Close()
 
 	ss := db.NewSnapshot()
-	ro := levigo.NewReadOptions()
-	ro.SetSnapshot(ss)
-	ro.SetFillCache(false)
+	sro := levigo.NewReadOptions()
+	sro.SetSnapshot(ss)
+	sro.SetFillCache(false)
 
-	it := db.NewIterator(ro)
+	it := db.NewIterator(sro)
 	defer it.Close()
 
 	wb := levigo.NewWriteBatch()
