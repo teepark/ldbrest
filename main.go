@@ -219,7 +219,7 @@ func initRouter() *httprouter.Router {
 	return router
 }
 
-func run(router *httprouter.Router) {
+func run(handler http.Handler) {
 	if len(serveAddrs) == 0 {
 		log.Fatal("no serveaddrs specified!")
 	}
@@ -227,7 +227,7 @@ func run(router *httprouter.Router) {
 	// start up each server in a goroutine of its own
 	for _, addr := range serveAddrs {
 		if strings.Contains(addr, ":") {
-			go http.ListenAndServe(addr, router)
+			go http.ListenAndServe(addr, handler)
 		} else {
 			go func(addr string) {
 				l, err := net.Listen("unix", addr)
@@ -235,7 +235,7 @@ func run(router *httprouter.Router) {
 					log.Fatal(err)
 				}
 
-				(&http.Server{Handler: router}).Serve(l)
+				(&http.Server{Handler: handler}).Serve(l)
 			}(addr)
 		}
 	}
