@@ -1,11 +1,45 @@
+/*
+ldbrest is a simple REST server for exposing a leveldb[1] database over TCP.
+
+Leveldb is a key-value database written to be embedded. Its major trade-off
+from an operational standpoint is that a single database can only be open
+*for reading OR writing* by a single process at a time.
+
+These properties make it perfect for a simple REST server offering CRUD
+operations on keys. ldbrest exposes a few other useful endpoints as well.
+
+GET /key/<name> returns the value associated with the <name> key in the
+response body with content-type text/plain (or 404s).
+
+PUT /key/<name> takes the (unparsed) request body and stores it as the value
+under key <name> and returns a 204.
+
+DELETE /key/<name> deletes the key <name> and returns a 204.
+
+GET /slice needs "start" and "end" querystring parameters. It will return a
+200 response with a JSON body with keys "length" and "data". data is an
+array of objects with "key" and "value" strings, "length" is just the length
+of "data". The returned key/value pairs will be all those in the database
+between "start" and "end" in sorted order.
+
+GET /property/<name> gets and returns the leveldb property in the text/plain
+200 response body, or 404s if it isn't a valid property name.
+
+POST /snapshot needs a JSON request body with key "destination", which
+should be a file system path. ldbrest will make a complete copy of the
+database at that location, then return a 204 (after what might be a while).
+
+[1] http://leveldb.org/
+*/
+
 package main
 
 import (
 	"bytes"
 	"encoding/json"
 	"flag"
-	"github.com/julienschmidt/httprouter"
 	"github.com/jmhodges/levigo"
+	"github.com/julienschmidt/httprouter"
 	"io"
 	"log"
 	"net"
@@ -13,14 +47,23 @@ import (
 	"strings"
 )
 
-var (
-	serveaddr = flag.String(
-		"serveaddr",
-		"127.0.0.1:8070",
-		"[host]:port or /path/to/socketfile of where to run the server",
-	)
-)
+// addrlist to support the flag.Value interface
+// and support multiple "serveaddr"s
+type addrlist []string
 
+func (al *addrlist) String() string {
+	return strings.Join(*al, ", ")
+}
+
+func (al *addrlist) Set(addr string) error {
+	*al = append(*al, addr)
+	return nil
+}
+
+// serveAddrs is the addrlist that captures -s and -serveaddr flags
+var serveAddrs addrlist
+
+// global vars for the main leveldb accesses
 var (
 	db *levigo.DB
 	ro *levigo.ReadOptions
@@ -28,6 +71,17 @@ var (
 )
 
 func main() {
+	// direct -s and -serveaddr flags at serveAddrs
+	flag.Var(
+		&serveAddrs,
+		"s",
+		"[host]:port or /path/to/socket of where to run the server. may be provided more than once",
+	)
+	flag.Var(
+		&serveAddrs,
+		"serveaddr",
+		"[host]:port or /path/to/socket of where to run the server. may be provided more than once",
+	)
 	flag.Parse()
 
 	openDB()
@@ -36,46 +90,106 @@ func main() {
 	defer db.Close()
 
 	router := initRouter()
-	log.Print(run(router))
+	run(router)
 }
 
 func initRouter() *httprouter.Router {
 	router := &httprouter.Router{
 		// precision in urls -- I'd rather know when my client is wrong
 		RedirectTrailingSlash: false,
-		RedirectFixedPath: false,
+		RedirectFixedPath:     false,
 
 		HandleMethodNotAllowed: true,
-		PanicHandler: handlePanics,
+		PanicHandler:           handlePanics,
 	}
 
-	router.GET("/key/:name", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
-		b, err := db.Get(ro, []byte(p.ByName("name")))
+	// retrieve single keys
+	router.GET("/key/*name", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+		b, err := db.Get(ro, []byte(p.ByName("name")[1:]))
 		if err != nil {
 			failErr(w, err)
 		} else if b == nil {
 			failCode(w, http.StatusNotFound)
-			w.WriteHeader(404)
 		} else {
+			w.Header().Set("Content-Type", "text/plain")
 			w.Write(b)
 		}
 	})
 
-	router.PUT("/key/:name", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+	// set single keys (value goes in the body)
+	router.PUT("/key/*name", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 		buf := &bytes.Buffer{}
 		if _, err := io.Copy(buf, r.Body); err != nil {
 			failErr(w, err)
 			return
 		}
 
-		err := db.Put(wo, []byte(p.ByName("name")), buf.Bytes())
+		err := db.Put(wo, []byte(p.ByName("name")[1:]), buf.Bytes())
 		if err != nil {
 			failErr(w, err)
 		} else {
-			w.WriteHeader(204)
+			w.WriteHeader(http.StatusNoContent)
 		}
 	})
 
+	// delete a key by name
+	router.DELETE("/key/*name", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+		err := db.Delete(wo, []byte(p.ByName("name")[1:]))
+		if err != nil {
+			failErr(w, err)
+		} else {
+			w.WriteHeader(http.StatusNoContent)
+		}
+	})
+
+	router.GET("/slice", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+		start := r.URL.Query().Get("start")
+		end := r.URL.Query().Get("end")
+
+		if start == "" || end == "" {
+			failCode(w, http.StatusBadRequest)
+			return
+		}
+
+		type keyval struct {
+			Key   string `json:"key"`
+			Value string `json:"value"`
+		}
+
+		type wrapper struct {
+			Length int       `json:"length"`
+			Data   []*keyval `json:"data"`
+		}
+
+		ropts := levigo.NewReadOptions()
+		ropts.SetFillCache(false)
+		it := db.NewIterator(ropts)
+		results := make([]*keyval, 0)
+		for it.Seek([]byte(start)); it.Valid(); it.Next() {
+			if string(it.Key()) >= end {
+				break
+			}
+
+			results = append(results, &keyval{
+				string(it.Key()), string(it.Value()),
+			})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(&wrapper{len(results), results})
+	})
+
+	// get a leveldb property
+	router.GET("/property/:name", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+		prop := db.PropertyValue(p.ByName("name"))
+		if prop == "" {
+			failCode(w, http.StatusNotFound)
+		} else {
+			w.Header().Set("Content-Type", "text/plain")
+			w.Write([]byte(prop))
+		}
+	})
+
+	// copy the whole db via a point-in-time snapshot
 	router.POST("/snapshot", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 		req := &struct {
 			Destination string
@@ -89,32 +203,43 @@ func initRouter() *httprouter.Router {
 		if err := makeSnap(req.Destination); err != nil {
 			failErr(w, err)
 		} else {
-			w.WriteHeader(204)
+			w.WriteHeader(http.StatusNoContent)
 		}
 	})
 
 	return router
 }
 
-func run(router *httprouter.Router) error {
-	if strings.Contains(*serveaddr, ":") {
-		return http.ListenAndServe(*serveaddr, router)
+func run(router *httprouter.Router) {
+	if len(serveAddrs) == 0 {
+		log.Fatal("no serveaddrs specified!")
 	}
 
-	listener, err := net.Listen("unix", *serveaddr)
-	if err != nil {
-		log.Fatal(err)
+	// start up each server in a goroutine of its own
+	for _, addr := range serveAddrs {
+		if strings.Contains(addr, ":") {
+			go http.ListenAndServe(addr, router)
+		} else {
+			go func(addr string) {
+				l, err := net.Listen("unix", addr)
+				if err != nil {
+					log.Fatal(err)
+				}
+
+				(&http.Server{Handler: router}).Serve(l)
+			}(addr)
+		}
 	}
 
-	return (&http.Server{Handler: router}).Serve(listener)
+	// prevent the main goroutine from ending (and thus the whole process)
+	<-make(chan struct{})
 }
 
 func openDB() {
-	args := flag.Args()
-	if len(args) == 0 {
+	if flag.NArg() == 0 {
 		log.Fatal("missing db path cmdline argument")
 	}
-	path := args[0]
+	path := flag.Args()[0]
 
 	opts := levigo.NewOptions()
 	opts.SetCreateIfMissing(true)
