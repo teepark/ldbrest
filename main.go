@@ -37,17 +37,6 @@ var (
 )
 
 func main() {
-	parseFlags()
-	openDB()
-	defer wo.Close()
-	defer ro.Close()
-	defer db.Close()
-
-	router := initRouter()
-	run(router)
-}
-
-func parseFlags() {
 	// direct -s and -serveaddr flags at serveAddrs
 	flag.Var(
 		&serveAddrs,
@@ -59,26 +48,15 @@ func parseFlags() {
 		"serveaddr",
 		"[host]:port or /path/to/socket of where to run the server. may be provided more than once",
 	)
-
 	flag.Parse()
-}
 
-func openDB() {
-	if flag.NArg() == 0 {
-		log.Fatal("missing db path cmdline argument")
-	}
-	path := flag.Args()[0]
+	openDB()
+	defer wo.Close()
+	defer ro.Close()
+	defer db.Close()
 
-	opts := levigo.NewOptions()
-	opts.SetCreateIfMissing(true)
-	ldb, err := levigo.Open(path, opts)
-	if err != nil {
-		log.Fatalf("opening leveldb: %s", err)
-	}
-
-	db = ldb
-	ro = levigo.NewReadOptions()
-	wo = levigo.NewWriteOptions()
+	router := initRouter()
+	run(router)
 }
 
 func initRouter() *httprouter.Router {
@@ -242,4 +220,22 @@ func run(router *httprouter.Router) {
 
 	// prevent the main goroutine from ending (and thus the whole process)
 	<-make(chan struct{})
+}
+
+func openDB() {
+	if flag.NArg() == 0 {
+		log.Fatal("missing db path cmdline argument")
+	}
+	path := flag.Args()[0]
+
+	opts := levigo.NewOptions()
+	opts.SetCreateIfMissing(true)
+	ldb, err := levigo.Open(path, opts)
+	if err != nil {
+		log.Fatalf("opening leveldb: %s", err)
+	}
+
+	db = ldb
+	ro = levigo.NewReadOptions()
+	wo = levigo.NewWriteOptions()
 }
