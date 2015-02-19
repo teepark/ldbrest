@@ -22,6 +22,10 @@ array of objects with "key" and "value" strings, "length" is just the length
 of "data". The returned key/value pairs will be all those in the database
 between "start" and "end" in sorted order.
 
+POST /batch accepts a JSON request body with key "ops", an array of objects
+with keys "op", "key", and "value". "op" may be "put" or "delete", in the
+latter case "value" may be omitted.
+
 GET /property/<name> gets and returns the leveldb property in the text/plain
 200 response body, or 404s if it isn't a valid property name.
 
@@ -29,7 +33,7 @@ POST /snapshot needs a JSON request body with key "destination", which
 should be a file system path. ldbrest will make a complete copy of the
 database at that location, then return a 204 (after what might be a while).
 
-[1] http://leveldb.org/
+[1] https://github.com/google/leveldb
 */
 
 package main
@@ -142,6 +146,7 @@ func initRouter() *httprouter.Router {
 		}
 	})
 
+	// fetch a contiguous range of keys and their values
 	router.GET("/slice", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 		start := r.URL.Query().Get("start")
 		end := r.URL.Query().Get("end")
@@ -176,6 +181,43 @@ func initRouter() *httprouter.Router {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(&wrapper{len(results), results})
+	})
+
+	// atomically write a batch of updates
+	router.POST("/batch", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+		req := &struct{
+			Ops []*struct {
+				Op, Key, Value string
+			}
+		}{}
+
+		err := json.NewDecoder(r.Body).Decode(req)
+		if err != nil {
+			failErr(w, err)
+			return
+		}
+
+		wb := levigo.NewWriteBatch()
+		defer wb.Close()
+
+		for _, op := range req.Ops {
+			switch op.Op {
+			case "put":
+				wb.Put([]byte(op.Key), []byte(op.Value))
+			case "delete":
+				wb.Delete([]byte(op.Key))
+			default:
+				failCode(w, http.StatusBadRequest)
+				return
+			}
+		}
+
+		if err := db.Write(wo, wb); err != nil {
+			failErr(w, err)
+			return
+		}
+
+		w.WriteHeader(http.StatusNoContent)
 	})
 
 	// get a leveldb property
