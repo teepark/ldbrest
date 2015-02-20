@@ -144,25 +144,21 @@ func initRouter() *httprouter.Router {
 			Key   string `json:"key"`
 			Value string `json:"value"`
 		}
-
 		type wrapper struct {
 			Length int       `json:"length"`
 			Data   []*keyval `json:"data"`
 		}
-
-		ropts := levigo.NewReadOptions()
-		ropts.SetFillCache(false)
-		it := db.NewIterator(ropts)
 		results := make([]*keyval, 0)
-		for it.Seek([]byte(start)); it.Valid(); it.Next() {
-			if string(it.Key()) >= end {
-				break
-			}
 
-			results = append(results, &keyval{
-				string(it.Key()), string(it.Value()),
-			})
+		err := iterSlice([]byte(start), []byte(end), func(key, value []byte) error {
+			results = append(results, &keyval{string(key), string(value)})
+			return nil
+		})
+		if err != nil {
+			failErr(w, err)
+			return
 		}
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(&wrapper{len(results), results})
 	})
