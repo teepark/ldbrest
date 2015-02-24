@@ -76,6 +76,7 @@ func openDB() {
 
 	opts := levigo.NewOptions()
 	opts.SetCreateIfMissing(true)
+	defer opts.Close()
 	ldb, err := levigo.Open(path, opts)
 	if err != nil {
 		log.Fatalf("opening leveldb: %s", err)
