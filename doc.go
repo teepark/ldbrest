@@ -16,11 +16,27 @@ under key <name> and returns a 204.
 
 DELETE /key/<name> deletes the key <name> and returns a 204.
 
-GET /slice needs "start" and "end" querystring parameters. It will return a
-200 response with a JSON body with keys "length" and "data". data is an
-array of objects with "key" and "value" strings, "length" is just the length
-of "data". The returned key/value pairs will be all those in the database
-between "start" and "end" in sorted order.
+GET /iterate iterates over the sorted keys. It takes optional query string
+parameters to control the iterator:
+
+- "forward" is whether to iterate forward through sorted order or reverse
+  (default "yes", iterate forward)
+- "start" is a key to start from (default beginning/end)
+- "include_start" is whether to include the key precisely matching "start" if
+  it exists (default "yes")
+- "end" is the key at which to terminate iteration (defaults to end/beginning)
+- "include_end" is whether to include the key precisely matching "end" if it
+  exists (default "no")
+- "max" is a maximum number of keys(/values) to return, this can be provided
+  in conjunction with "end" in which case either condition would terminate
+  iteration (default 1000, higher values than this will be ignored)
+- "include_values" is whether to produce {"key": "<key>", "value": "<value>"}
+  objects or just "<key>" strings (default "yes")
+
+It then returns a JSON object with two keys "more" and "data". "data" is an
+array of either objects or strings depending on "include_values", while "more"
+is false unless "end" was provided but "max" caused the end of iteration (there
+was still more to go before we would have hit "end").
 
 POST /batch accepts a JSON request body with key "ops", an array of objects
 with keys "op", "key", and "value". "op" may be "put" or "delete", in the

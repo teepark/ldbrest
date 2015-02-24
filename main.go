@@ -10,7 +10,12 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
+)
+
+const (
+	ABSMAX = 1000
 )
 
 // addrlist to support the flag.Value interface
@@ -131,36 +136,70 @@ func initRouter() *httprouter.Router {
 	})
 
 	// fetch a contiguous range of keys and their values
-	router.GET("/slice", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
-		start := r.URL.Query().Get("start")
-		end := r.URL.Query().Get("end")
+	router.GET("/iterate", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+		q := r.URL.Query()
+		start := q.Get("start")
+		end := q.Get("end")
 
-		if start == "" || end == "" {
-			failCode(w, http.StatusBadRequest)
+		var (
+			max int
+			err error
+		)
+		maxs := q.Get("max")
+		if maxs == "" {
+			max = ABSMAX
+		} else if max, err = strconv.Atoi(maxs); err != nil {
+			failErr(w, err)
 			return
 		}
+		if max > ABSMAX {
+			max = ABSMAX
+		}
+
+		// by default we traverse forwards,
+		// include "start" but not "end" (like go slicing),
+		// and include values in the response data
+		ignore_start := q.Get("include_start") == "no"
+		include_end := q.Get("include_end") == "yes"
+		backwards := q.Get("forward") == "no"
+		skip_values := q.Get("include_values") == "no"
 
 		type keyval struct {
 			Key   string `json:"key"`
 			Value string `json:"value"`
 		}
 		type wrapper struct {
-			Length int       `json:"length"`
-			Data   []*keyval `json:"data"`
+			More bool          `json:"more"`
+			Data []interface{} `json:"data"` // either keyvals or just string keys
 		}
-		results := make([]*keyval, 0)
 
-		err := iterSlice([]byte(start), []byte(end), func(key, value []byte) error {
-			results = append(results, &keyval{string(key), string(value)})
+		var (
+			data = make([]interface{}, 0)
+			more bool
+		)
+
+		once := func(key, value []byte) error {
+			if skip_values {
+				data = append(data, key)
+			} else {
+				data = append(data, &keyval{string(key), string(value)})
+			}
 			return nil
-		})
+		}
+
+		if end == "" {
+			err = iterateN([]byte(start), max, !ignore_start, backwards, once)
+			more = false
+		} else {
+			more, err = iterateUntil([]byte(start), []byte(end), max, !ignore_start, include_end, backwards, once)
+		}
+
 		if err != nil {
 			failErr(w, err)
 			return
 		}
-
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(&wrapper{len(results), results})
+		json.NewEncoder(w).Encode(&wrapper{more, data})
 	})
 
 	// atomically write a batch of updates
@@ -215,7 +254,7 @@ func initRouter() *httprouter.Router {
 	return router
 }
 
-func run(handler http.Handler) {
+func run(router *httprouter.Router) {
 	if len(serveAddrs) == 0 {
 		log.Fatal("no serveaddrs specified!")
 	}
@@ -223,7 +262,7 @@ func run(handler http.Handler) {
 	// start up each server in a goroutine of its own
 	for _, addr := range serveAddrs {
 		if strings.Contains(addr, ":") {
-			go http.ListenAndServe(addr, handler)
+			go http.ListenAndServe(addr, router)
 		} else {
 			go func(addr string) {
 				l, err := net.Listen("unix", addr)
@@ -231,7 +270,7 @@ func run(handler http.Handler) {
 					log.Fatal(err)
 				}
 
-				(&http.Server{Handler: handler}).Serve(l)
+				(&http.Server{Handler: router}).Serve(l)
 			}(addr)
 		}
 	}
