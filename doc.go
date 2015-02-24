@@ -56,9 +56,9 @@ is false unless "end" was provided but "max" caused the end of iteration (there
 was still more to go before we would have hit "end").
 
   POST /batch
-Accepts a JSON request body with key "ops", an array of objects with keys "op",
-"key", and "value". "op" may be "put" or "delete", in the latter case "value"
-may be omitted.
+Applies a batch of updates atomically. It accepts a JSON request body with key
+"ops", an array of objects with keys "op", "key", and "value". "op" may be
+"put" or "delete", in the latter case "value" may be omitted.
 
   GET /property/<name>
 Gets and returns the leveldb property in the text/plain 200 response body, or
