@@ -32,15 +32,21 @@ control the iterator:
 
 * "forward" is whether to iterate forward through sorted order or reverse
 (default "yes", iterate forward)
+
 * "start" is a key to start from (default beginning/end)
+
 * "include_start" is whether to include the key precisely matching "start" if
 it exists (default "yes")
+
 * "end" is the key at which to terminate iteration (defaults to end/beginning)
+
 * "include_end" is whether to include the key precisely matching "end" if it
 exists (default "no")
+
 * "max" is a maximum number of keys(/values) to return, this can be provided
 in conjunction with "end" in which case either condition would terminate
 iteration (default 1000, higher values than this will be ignored)
+
 * "include_values" is whether to produce {"key": "<key>", "value": "<value>"}
 objects or just "<key>" strings (default "yes")
 
