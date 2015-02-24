@@ -256,7 +256,7 @@ func initRouter() *httprouter.Router {
 
 func run(router *httprouter.Router) {
 	if len(serveAddrs) == 0 {
-		log.Fatal("no serveaddrs specified!")
+		serveAddrs = addrlist{"127.0.0.1:7000"}
 	}
 
 	// start up each server in a goroutine of its own
