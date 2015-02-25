@@ -181,7 +181,7 @@ func initRouter() *httprouter.Router {
 
 		once := func(key, value []byte) error {
 			if skip_values {
-				data = append(data, key)
+				data = append(data, string(key))
 			} else {
 				data = append(data, &keyval{string(key), string(value)})
 			}
