@@ -174,7 +174,7 @@ type appTester struct {
 }
 
 func newAppTester(tb testing.TB) *appTester {
-	return &appTester{app: initRouter(), tb: tb}
+	return &appTester{app: InitRouter(""), tb: tb}
 }
 
 func (app *appTester) doReq(method, url, body string) *httptest.ResponseRecorder {
