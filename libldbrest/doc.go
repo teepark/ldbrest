@@ -71,4 +71,4 @@ return a 204 (after what might be a while).
 
 [1] https://github.com/google/leveldb
 */
-package main
+package libldbrest

@@ -1,4 +1,4 @@
-package main
+package libldbrest
 
 import "github.com/jmhodges/levigo"
 
