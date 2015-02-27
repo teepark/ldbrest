@@ -14,7 +14,8 @@ const (
 	ABSMAX = 1000
 )
 
-// InitRouter
+// InitRouter creates an *httprouter.Router and sets the endpoints to run the
+// ldbrest server
 func InitRouter(prefix string) *httprouter.Router {
 	router := &httprouter.Router{
 		// precision in urls -- I'd rather know when my client is wrong
