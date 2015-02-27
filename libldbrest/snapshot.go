@@ -4,6 +4,7 @@ import "github.com/jmhodges/levigo"
 
 func makeSnap(dest string) error {
 	opts := levigo.NewOptions()
+	defer opts.Close()
 	opts.SetCreateIfMissing(true)
 	opts.SetErrorIfExists(true)
 	to, err := levigo.Open(dest, opts)
@@ -14,6 +15,7 @@ func makeSnap(dest string) error {
 
 	ss := db.NewSnapshot()
 	sro := levigo.NewReadOptions()
+	defer sro.Close()
 	sro.SetSnapshot(ss)
 	sro.SetFillCache(false)
 
@@ -40,6 +42,8 @@ func makeSnap(dest string) error {
 		if err != nil {
 			goto fail
 		}
+	} else {
+		wb.Close()
 	}
 
 	return nil

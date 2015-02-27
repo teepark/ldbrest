@@ -7,6 +7,7 @@ import (
 
 func iterate(start []byte, include_start, backwards bool, handle func([]byte, []byte) (bool, error)) error {
 	ropts := levigo.NewReadOptions()
+	defer ropts.Close()
 	ropts.SetFillCache(false)
 
 	it := db.NewIterator(ropts)

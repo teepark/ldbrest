@@ -6,7 +6,7 @@ import (
 )
 
 func handlePanics(w http.ResponseWriter, r *http.Request, err interface{}) {
-	log.Printf("PANIC in handler: %s", err)
+	log.Printf("PANIC in handler: %v", err)
 	w.WriteHeader(http.StatusInternalServerError)
 }
 

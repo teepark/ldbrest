@@ -29,10 +29,16 @@ var serveAddrs addrlist
 
 func main() {
 	parseFlags()
-	lib.OpenDB()
+
+	if flag.NArg() == 0 {
+		log.Fatal("missing db path cmdline argument")
+	}
+	path := flag.Args()[0]
+
+	lib.OpenDB(path)
 	defer lib.CleanupDB()
 
-	router := lib.InitRouter()
+	router := lib.InitRouter("")
 	run(router)
 }
 

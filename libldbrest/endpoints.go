@@ -3,13 +3,10 @@ package libldbrest
 import (
 	"bytes"
 	"encoding/json"
-	"flag"
 	"io"
-	"log"
 	"net/http"
 	"strconv"
 
-	"github.com/jmhodges/levigo"
 	"github.com/julienschmidt/httprouter"
 )
 
@@ -17,38 +14,8 @@ const (
 	ABSMAX = 1000
 )
 
-var (
-	db *levigo.DB
-	ro *levigo.ReadOptions
-	wo *levigo.WriteOptions
-)
-
-func OpenDB() {
-	if flag.NArg() == 0 {
-		log.Fatal("missing db path cmdline argument")
-	}
-	path := flag.Args()[0]
-
-	opts := levigo.NewOptions()
-	opts.SetCreateIfMissing(true)
-	defer opts.Close()
-	ldb, err := levigo.Open(path, opts)
-	if err != nil {
-		log.Fatalf("opening leveldb: %s", err)
-	}
-
-	db = ldb
-	ro = levigo.NewReadOptions()
-	wo = levigo.NewWriteOptions()
-}
-
-func CleanupDB() {
-	wo.Close()
-	ro.Close()
-	db.Close()
-}
-
-func InitRouter() *httprouter.Router {
+// InitRouter
+func InitRouter(prefix string) *httprouter.Router {
 	router := &httprouter.Router{
 		// precision in urls -- I'd rather know when my client is wrong
 		RedirectTrailingSlash: false,
@@ -59,7 +26,7 @@ func InitRouter() *httprouter.Router {
 	}
 
 	// retrieve single keys
-	router.GET("/key/*name", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+	router.GET(prefix+"/key/*name", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 		b, err := db.Get(ro, []byte(p.ByName("name")[1:]))
 		if err != nil {
 			failErr(w, err)
@@ -72,7 +39,7 @@ func InitRouter() *httprouter.Router {
 	})
 
 	// set single keys (value goes in the body)
-	router.PUT("/key/*name", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+	router.PUT(prefix+"/key/*name", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 		buf := &bytes.Buffer{}
 		if _, err := io.Copy(buf, r.Body); err != nil {
 			failErr(w, err)
@@ -88,7 +55,7 @@ func InitRouter() *httprouter.Router {
 	})
 
 	// delete a key by name
-	router.DELETE("/key/*name", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+	router.DELETE(prefix+"/key/*name", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 		err := db.Delete(wo, []byte(p.ByName("name")[1:]))
 		if err != nil {
 			failErr(w, err)
@@ -98,7 +65,7 @@ func InitRouter() *httprouter.Router {
 	})
 
 	// fetch a contiguous range of keys and their values
-	router.GET("/iterate", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+	router.GET(prefix+"/iterate", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 		q := r.URL.Query()
 		start := q.Get("start")
 		end := q.Get("end")
@@ -165,7 +132,7 @@ func InitRouter() *httprouter.Router {
 	})
 
 	// atomically write a batch of updates
-	router.POST("/batch", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+	router.POST(prefix+"/batch", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 		req := &struct{ Ops oplist }{}
 
 		err := json.NewDecoder(r.Body).Decode(req)
@@ -185,7 +152,7 @@ func InitRouter() *httprouter.Router {
 	})
 
 	// get a leveldb property
-	router.GET("/property/:name", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+	router.GET(prefix+"/property/:name", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 		prop := db.PropertyValue(p.ByName("name"))
 		if prop == "" {
 			failCode(w, http.StatusNotFound)
@@ -196,7 +163,7 @@ func InitRouter() *httprouter.Router {
 	})
 
 	// copy the whole db via a point-in-time snapshot
-	router.POST("/snapshot", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+	router.POST(prefix+"/snapshot", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 		req := &struct {
 			Destination string
 		}{}
