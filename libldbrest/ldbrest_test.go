@@ -3,7 +3,6 @@ package libldbrest
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/jmhodges/levigo"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -11,6 +10,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/jmhodges/levigo"
 )
 
 func TestKeyPutGet(t *testing.T) {
@@ -29,6 +30,28 @@ func TestKeyPutGet(t *testing.T) {
 	found, _ := app.maybeGet("baz")
 	if found {
 		t.Fatal("found 'baz' when we shouldn't have")
+	}
+}
+
+func TestDelete(t *testing.T) {
+	dbpath := setup(t)
+	defer cleanup(dbpath)
+
+	app := newAppTester(t)
+
+	app.put("a", "A")
+
+	if !app.del("a") {
+		t.Fatal("failed to DELETE existing key")
+	}
+
+	if !app.del("b") {
+		t.Fatal("failed to DELETE non-existing key")
+	}
+
+	found, _ := app.maybeGet("a")
+	if found {
+		t.Fatal("DELETE didn't remove a key")
 	}
 }
 
@@ -123,6 +146,30 @@ func TestIteration(t *testing.T) {
 	assert(t, kresp.More, "'more' should be true (reverse)")
 	assert(t, kresp.Data[0] == "d", "wrong data[0]: %s", kresp.Data[0])
 	assert(t, kresp.Data[1] == "c", "wrong data[1]: %s", kresp.Data[1])
+}
+
+func TestBatch(t *testing.T) {
+	dbpath := setup(t)
+	defer cleanup(dbpath)
+
+	app := newAppTester(t)
+	app.put("foo", "bar")
+
+	if !app.batch(oplist{
+		{"put", "a", "A"},
+		{"put", "b", "B"},
+		{"delete", "foo", ""},
+	}) {
+		t.Fatal("batch call failed")
+	}
+
+	if app.get("a") != "A" || app.get("b") != "B" {
+		t.Fatal("puts in the batch didn't go through")
+	}
+
+	if found, _ := app.maybeGet("foo"); found {
+		t.Fatal("delete in the batch didn't go through")
+	}
 }
 
 func setup(tb testing.TB) string {
@@ -226,4 +273,21 @@ func (app *appTester) get(key string) string {
 		app.tb.Fatalf("failed to find key %s", key)
 	}
 	return value
+}
+
+func (app *appTester) del(key string) bool {
+	rr := app.doReq("DELETE", fmt.Sprintf("http://domain/key/%s", key), "")
+	return rr.Code == 204
+}
+
+func (app *appTester) batch(ops oplist) bool {
+	body, err := json.Marshal(struct {
+		Ops oplist `json:"ops"`
+	}{ops})
+	if err != nil {
+		app.tb.Fatalf("json ops Marshal: %v", err)
+	}
+
+	rr := app.doReq("POST", "http://domain/batch", string(body))
+	return rr.Code == 204
 }
