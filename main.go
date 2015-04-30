@@ -6,8 +6,8 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 
-	"github.com/julienschmidt/httprouter"
 	lib "github.com/teepark/ldbrest/libldbrest"
 )
 
@@ -35,11 +35,34 @@ func main() {
 	}
 	path := flag.Args()[0]
 
-	lib.OpenDB(path)
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
+
+	go func() {
+		lib.OpenDB(path)
+		wg.Done()
+	}()
 	defer lib.CleanupDB()
 
 	router := lib.InitRouter("")
-	run(router)
+	run(unavailUntilReady(router, wg))
+}
+
+func unavailUntilReady(h http.Handler, wg *sync.WaitGroup) http.Handler {
+	type maybeHandles struct{ http.Handler }
+
+	notReady := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		http.Error(w, "not finished initing DB", http.StatusServiceUnavailable)
+	})
+
+	mh := &maybeHandles{notReady}
+	go func() {
+		wg.Wait()
+		mh.Handler = h
+	}()
+
+	return mh
 }
 
 func parseFlags() {
@@ -58,7 +81,7 @@ func parseFlags() {
 	flag.Parse()
 }
 
-func run(router *httprouter.Router) {
+func run(router http.Handler) {
 	if len(serveAddrs) == 0 {
 		serveAddrs = addrlist{"127.0.0.1:7000"}
 	}
