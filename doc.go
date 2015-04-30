@@ -26,6 +26,13 @@ and returns a 204.
   DELETE /key/<name>
 Deletes the key <name> and returns a 204.
 
+  GET /keys
+Retrieves all of a group of keys in one endpoint. It takes a JSON request body
+with a single key "keys", which should be an array of the string keys to
+retrieve. The response is application/json with top-level key/value pairs of
+the keys it was told to retrieve and their corresponding values (or null if
+they weren't found).
+
   GET /iterate
 Iterates over the sorted keys. It takes optional query string parameters to
 control the iterator:

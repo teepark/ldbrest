@@ -65,6 +65,30 @@ func InitRouter(prefix string) *httprouter.Router {
 		}
 	})
 
+	// retrieve a given set of keys
+	router.GET(prefix+"/keys", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+		req := &struct{ Keys []string }{}
+
+		err := json.NewDecoder(r.Body).Decode(req)
+		if err != nil {
+			failErr(w, err)
+			return
+		}
+
+		results := make(map[string]string, len(req.Keys))
+		for _, key := range req.Keys {
+			val, err := db.Get(ro, []byte(key))
+			if err != nil {
+				failErr(w, err)
+				return
+			}
+			results[key] = string(val)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(results)
+	})
+
 	// fetch a contiguous range of keys and their values
 	router.GET(prefix+"/iterate", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 		q := r.URL.Query()
