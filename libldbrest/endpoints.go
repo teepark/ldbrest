@@ -132,13 +132,17 @@ func InitRouter(prefix string) *httprouter.Router {
 			more bool
 		)
 
-		once := func(key, value []byte) error {
-			if skip_values {
+		var once func([]byte, []byte) error
+		if skip_values {
+			once = func(key, value []byte) error {
 				data = append(data, string(key))
-			} else {
-				data = append(data, &keyval{string(key), string(value)})
+				return nil
 			}
-			return nil
+		} else {
+			once = func(key, value []byte) error {
+				data = append(data, &keyval{string(key), string(value)})
+				return nil
+			}
 		}
 
 		if end == "" {
