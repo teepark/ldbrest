@@ -66,7 +66,8 @@ func InitRouter(prefix string) *httprouter.Router {
 	})
 
 	// retrieve a given set of keys
-	router.GET(prefix+"/keys", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+	// (must be a POST to accept a request body, but we aren't changing server-side data)
+	router.POST(prefix+"/keys", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 		req := &struct{ Keys []string }{}
 
 		err := json.NewDecoder(r.Body).Decode(req)
